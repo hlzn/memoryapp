@@ -1,0 +1,63 @@
+@page "/"
+@inject NavigationManager Navigation
+
+<PageTitle>VerbMeister - Aprende Verbos Alemanes</PageTitle>
+
+<div class="container">
+    <div class="text-center mb-2">
+        <h1>VerbMeister</h1>
+        <p class="text-muted">Domina los verbos alemanes con repetición espaciada</p>
+    </div>
+
+    <div class="level-selector">
+        <button class="level-btn @(selectedLevel == "A1" ? "active" : "")" @onclick='() => SetLevel("A1")'>A1</button>
+        <button class="level-btn @(selectedLevel == "A2" ? "active" : "")" @onclick='() => SetLevel("A2")'>A2</button>
+        <button class="level-btn @(selectedLevel == "B1" ? "active" : "")" @onclick='() => SetLevel("B1")'>B1</button>
+        <button class="level-btn @(selectedLevel == "B2" ? "active" : "")" @onclick='() => SetLevel("B2")'>B2</button>
+    </div>
+    <div class="btn-group-vertical mt-2">
+        <div class="card card-clickable" @onclick="StartCards">
+            <h2>🎴 Tarjetas de Estudio</h2>
+            <p class="text-muted">Memoriza verbos con el sistema de repetición espaciada (SRS)</p>
+        </div>
+
+        <div class="card" style="opacity: 0.6;">
+            <h2>🖼️ Asociación de Imágenes</h2>
+            <p class="text-muted">Conecta verbos con imágenes visuales (próximamente)</p>
+        </div>
+
+        <div class="card card-clickable" @onclick="StartSentences">
+            <h2>✍️ Completar Frases</h2>
+            <p class="text-muted">Practica verbos en contexto real</p>
+        </div>
+
+        <div class="card card-clickable" @onclick="ViewProgress">
+            <h2>📊 Ver Mi Progreso</h2>
+            <p class="text-muted">Revisa tus estadísticas y dominio de verbos</p>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string selectedLevel = "A1";
+
+    private void SetLevel(string level)
+    {
+        selectedLevel = level;
+    }
+
+    private void StartCards()
+    {
+        Navigation.NavigateTo($"/cards?level={selectedLevel}");
+    }
+
+    private void StartSentences()
+    {
+        Navigation.NavigateTo($"/sentences?level={selectedLevel}&difficulty=easy");
+    }
+
+    private void ViewProgress()
+    {
+        Navigation.NavigateTo($"/progress?level={selectedLevel}");
+    }
+}

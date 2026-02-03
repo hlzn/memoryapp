@@ -1,0 +1,263 @@
+@page "/sentences"
+@using System.Net.Http.Json
+@using MemoryApp.Contracts
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Completar Frases - VerbMeister</PageTitle>
+
+<div class="container">
+    @if (loading)
+    {
+        <div class="text-center mt-2">
+            <p>Cargando ejercicios...</p>
+        </div>
+    }
+    else if (questions == null || !questions.Any())
+    {
+        <div class="text-center mt-2">
+            <h2>¡No hay ejercicios disponibles!</h2>
+            <p class="text-muted">No hay frases para practicar en este nivel.</p>
+            <button class="btn btn-primary mt-1" @onclick="GoHome">Volver al inicio</button>
+        </div>
+    }
+    else
+    {
+        <div class="mb-2">
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: @(ProgressPercentage)%"></div>
+            </div>
+            <p class="text-muted text-center">@currentIndex / @questions.Count</p>
+        </div>
+
+        @if (currentQuestion != null)
+        {
+            <div class="card">
+                <h3 class="mb-1">Completa la frase</h3>
+
+                @if (!string.IsNullOrEmpty(currentQuestion.TranslationEs))
+                {
+                    <p class="text-muted" style="font-size: 0.875rem; font-style: italic;">
+                        @currentQuestion.TranslationEs
+                    </p>
+                }
+
+                <div style="font-size: 1.25rem; margin: 1.5rem 0; padding: 1rem; background: #f9f9f9; border-radius: 6px;">
+                    @currentQuestion.SentenceTemplate
+                </div>
+
+                @if (currentQuestion.WordBank != null && currentQuestion.WordBank.Any())
+                {
+                    <div class="mb-1">
+                        <p class="text-muted" style="font-size: 0.875rem;">Banco de palabras:</p>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            @foreach (var word in currentQuestion.WordBank)
+                            {
+                                <span style="padding: 0.25rem 0.75rem; background: white; border: 1px solid var(--color-border); border-radius: 4px; font-weight: 500;">
+                                    @word
+                                </span>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="mt-1">
+                    <input type="text"
+                           class="sentence-input"
+                           @bind="userAnswer"
+                           @bind:event="oninput"
+                           @onkeypress="HandleKeyPress"
+                           placeholder="Escribe tu respuesta..."
+                           disabled="@answered" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(currentQuestion.Hint) && !answered)
+                {
+                    <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.5rem;">
+                        💡 Pista: @currentQuestion.Hint
+                    </p>
+                }
+
+                @if (!answered)
+                {
+                    <div class="btn-group mt-1">
+                        <button class="btn btn-primary" @onclick="CheckAnswer" disabled="@string.IsNullOrWhiteSpace(userAnswer)">
+                            Comprobar
+                        </button>
+                        <button class="btn btn-secondary" @onclick="SkipQuestion">
+                            Saltar
+                        </button>
+                    </div>
+                }
+
+                @if (answered && feedback != null)
+                {
+                    <div class="feedback @feedbackClass mt-1">
+                        <strong>@feedback.Message</strong>
+                        @if (!feedback.IsCorrect)
+                        {
+                            <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                                Respuesta correcta: <strong>@feedback.CorrectAnswer</strong>
+                            </p>
+                            @if (!string.IsNullOrEmpty(feedback.Explanation))
+                            {
+                                <p style="margin-top: 0.5rem; margin-bottom: 0; font-size: 0.875rem;">
+                                    @feedback.Explanation
+                                </p>
+                            }
+                        }
+                    </div>
+
+                    <button class="btn btn-primary mt-1" @onclick="NextQuestion">
+                        @(currentIndex < questions.Count ? "Siguiente" : "Ver Resultados")
+                    </button>
+                }
+            </div>
+        }
+    }
+</div>
+
+<style>
+.sentence-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 2px solid var(--color-border);
+    border-radius: 6px;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.sentence-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+.sentence-input:disabled {
+    background: #f5f5f5;
+    cursor: not-allowed;
+}
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "level")]
+    public string? Level { get; set; }
+
+    [SupplyParameterFromQuery(Name = "difficulty")]
+    public string? Difficulty { get; set; }
+
+    private List<SentenceQuestionDto> questions = new();
+    private SentenceQuestionDto? currentQuestion;
+    private int currentIndex = 1;
+    private bool loading = true;
+    private bool answered = false;
+    private string userAnswer = "";
+    private CheckSentenceAnswerResponse? feedback;
+    private string feedbackClass = "";
+    private Guid sessionId;
+    private int correctCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSession();
+    }
+
+    private async Task LoadSession()
+    {
+        loading = true;
+        try
+        {
+            var level = Level ?? "A1";
+            var difficulty = Difficulty ?? "easy";
+            var response = await Http.GetFromJsonAsync<GetSentencesSessionResponse>(
+                $"/api/v1/modes/sentences/session?level={level}&difficulty={difficulty}&count=10");
+
+            if (response != null)
+            {
+                sessionId = response.SessionId;
+                questions = response.Questions;
+                if (questions.Any())
+                {
+                    currentQuestion = questions[0];
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading session: {ex.Message}");
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task CheckAnswer()
+    {
+        if (currentQuestion == null || string.IsNullOrWhiteSpace(userAnswer)) return;
+
+        try
+        {
+            var request = new CheckSentenceAnswerRequest
+            {
+                SessionId = sessionId,
+                SentenceId = currentQuestion.SentenceId,
+                Answer = userAnswer
+            };
+
+            var response = await Http.PostAsJsonAsync("/api/v1/modes/sentences/answer", request);
+            feedback = await response.Content.ReadFromJsonAsync<CheckSentenceAnswerResponse>();
+
+            if (feedback != null)
+            {
+                answered = true;
+                feedbackClass = feedback.IsCorrect ? "feedback-success" : "feedback-error";
+                if (feedback.IsCorrect)
+                {
+                    correctCount++;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking answer: {ex.Message}");
+        }
+    }
+
+    private void NextQuestion()
+    {
+        if (currentIndex < questions.Count)
+        {
+            currentIndex++;
+            currentQuestion = questions[currentIndex - 1];
+            userAnswer = "";
+            answered = false;
+            feedback = null;
+        }
+        else
+        {
+            // Session complete - show results
+            Navigation.NavigateTo($"/progress?level={Level ?? "A1"}");
+        }
+    }
+
+    private void SkipQuestion()
+    {
+        NextQuestion();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !answered && !string.IsNullOrWhiteSpace(userAnswer))
+        {
+            await CheckAnswer();
+        }
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+
+    private double ProgressPercentage => questions.Any() ? ((double)currentIndex / questions.Count) * 100 : 0;
+}
