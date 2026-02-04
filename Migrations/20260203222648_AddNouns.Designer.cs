@@ -3,6 +3,7 @@ using System;
 using MemoryApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,44 +11,14 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MemoryApp.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260203222648_AddNouns")]
+    partial class AddNouns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
-
-            modelBuilder.Entity("MemoryApp.Data.Models.AppSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AiApiKey")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AiEndpoint")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("AiFeedbackEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AiModel")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("AiMaxTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AiSystemPrompt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("AiTimeoutSeconds")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("AppSettings");
-                });
 
             modelBuilder.Entity("MemoryApp.Data.Models.Attempt", b =>
                 {

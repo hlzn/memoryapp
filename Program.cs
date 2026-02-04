@@ -10,7 +10,16 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 // Add HttpClient for API calls from Blazor components
-builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped(sp =>
+{
+    var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
+    var request = httpContextAccessor.HttpContext?.Request;
+    var baseUri = request != null
+        ? $"{request.Scheme}://{request.Host}"
+        : "http://localhost:5296";
+    return new HttpClient { BaseAddress = new Uri(baseUri) };
+});
 
 // Add DbContext
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -19,6 +28,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Add services
 builder.Services.AddScoped<MemoryApp.Services.UserService>();
 builder.Services.AddScoped<MemoryApp.Services.SrsService>();
+builder.Services.AddScoped<MemoryApp.Services.MatchingSessionService>();
+builder.Services.AddScoped<MemoryApp.Services.MatchingAnswerService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<MemoryApp.Services.AiFeedbackService>();
 
 // Add FastEndpoints
 builder.Services.AddFastEndpoints();

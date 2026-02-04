@@ -1,0 +1,424 @@
+@page "/matching"
+@using MemoryApp.Contracts
+@using MemoryApp.Services
+@inject NavigationManager Navigation
+@inject MatchingSessionService MatchingSessionService
+@inject MatchingAnswerService MatchingAnswerService
+@rendermode InteractiveServer
+
+<PageTitle>Matching - VerbMeister</PageTitle>
+
+<div class="container">
+    @if (loading)
+    {
+        <div class="text-center mt-2">
+            <p>Cargando sustantivos...</p>
+        </div>
+    }
+    else if (cards == null || !cards.Any())
+    {
+        <div class="text-center mt-2">
+            <h2>¡No hay sustantivos disponibles!</h2>
+            <p class="text-muted">Agrega sustantivos desde la administración para practicar.</p>
+            <div class="btn-group mt-1">
+                <button class="btn btn-primary" @onclick="GoToNounAdmin">Administrar Sustantivos</button>
+                <button class="btn btn-secondary" @onclick="GoHome">Volver al inicio</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="mb-2">
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: @(ProgressPercentage)%"></div>
+            </div>
+            <p class="text-muted text-center">@currentIndex / @cards.Count</p>
+        </div>
+
+        @if (currentCard != null)
+        {
+            <div class="matching-card @cardResultClass">
+                <div class="card-content">
+                    <p class="text-muted">Español → Alemán</p>
+                    <div class="spanish-word">@currentCard.TranslationEs</div>
+
+                    @if (!answered)
+                    {
+                        <form @onsubmit="SubmitAnswer" @onsubmit:preventDefault class="answer-form">
+                            <div class="input-row">
+                                <div class="input-group article-input">
+                                    <label>Artículo</label>
+                                    <select @bind="inputArticle" disabled="@submitting">
+                                        <option value="">--</option>
+                                        <option value="der">der</option>
+                                        <option value="die">die</option>
+                                        <option value="das">das</option>
+                                    </select>
+                                </div>
+                                <div class="input-group word-input">
+                                    <label>Palabra</label>
+                                    <input type="text" @bind="inputGerman" @bind:event="oninput"
+                                           placeholder="Escribe en alemán..."
+                                           disabled="@submitting"
+                                           @ref="germanInput" />
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary mt-1"
+                                    disabled="@(submitting || string.IsNullOrWhiteSpace(inputGerman))">
+                                @(submitting ? "Verificando..." : "Comprobar")
+                            </button>
+                        </form>
+                    }
+                    else
+                    {
+                        <div class="result-display">
+                            <div class="correct-answer">
+                                @if (!string.IsNullOrWhiteSpace(lastCorrectArticle))
+                                {
+                                    <span class="article article-@lastCorrectArticle">@lastCorrectArticle</span>
+                                }
+                                <span class="german-word">@lastCorrectGerman</span>
+                            </div>
+                            <p class="feedback-message">@feedbackMessage</p>
+                            @if (!string.IsNullOrEmpty(aiComment))
+                            {
+                                <div class="ai-comment">
+                                    <span class="ai-icon">🤖</span>
+                                    <p>@aiComment</p>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (answered)
+            {
+                <div class="btn-group mt-2">
+                    <button class="btn btn-primary" @onclick="NextCard">
+                        @(currentIndex < cards.Count ? "Siguiente" : "Ver Resultados")
+                    </button>
+                </div>
+            }
+        }
+    }
+</div>
+
+<style>
+    .matching-card {
+        background: var(--card-bg);
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        transition: all 0.3s ease;
+        border: 3px solid transparent;
+    }
+
+    .matching-card.result-correct {
+        background: rgba(34, 197, 94, 0.15);
+        border-color: #22c55e;
+    }
+
+    .matching-card.result-partial {
+        background: rgba(234, 179, 8, 0.15);
+        border-color: #eab308;
+    }
+
+    .matching-card.result-wrong {
+        background: rgba(239, 68, 68, 0.15);
+        border-color: #ef4444;
+    }
+
+    .spanish-word {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin: 1.5rem 0;
+        color: var(--primary);
+    }
+
+    .answer-form {
+        margin-top: 1.5rem;
+    }
+
+    .input-row {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+        align-items: flex-end;
+    }
+
+    .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .input-group label {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        text-align: left;
+    }
+
+    .article-input select {
+        padding: 0.75rem 1rem;
+        font-size: 1.25rem;
+        border: 2px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        min-width: 80px;
+    }
+
+    .word-input input {
+        padding: 0.75rem 1rem;
+        font-size: 1.25rem;
+        border: 2px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        min-width: 200px;
+    }
+
+    .article-input select:focus,
+    .word-input input:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+
+    .result-display {
+        margin-top: 1.5rem;
+    }
+
+    .correct-answer {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .article {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 6px;
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .article-der {
+        background: #3b82f6;
+        color: white;
+    }
+
+    .article-die {
+        background: #ec4899;
+        color: white;
+    }
+
+    .article-das {
+        background: #22c55e;
+        color: white;
+    }
+
+    .german-word {
+        font-size: 2rem;
+        font-weight: 600;
+    }
+
+    .feedback-message {
+        font-size: 1.125rem;
+        margin-top: 1rem;
+    }
+
+    .result-correct .feedback-message {
+        color: #22c55e;
+    }
+
+    .result-partial .feedback-message {
+        color: #eab308;
+    }
+
+    .result-wrong .feedback-message {
+        color: #ef4444;
+    }
+
+    .btn-group {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+    }
+
+    .ai-comment {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: rgba(139, 92, 246, 0.1);
+        border: 1px solid #8b5cf6;
+        border-radius: 12px;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .ai-comment .ai-icon {
+        font-size: 1.5rem;
+        flex-shrink: 0;
+    }
+
+    .ai-comment p {
+        margin: 0;
+        color: var(--text);
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "level")]
+    public string? Level { get; set; }
+
+    private List<MatchingCardDto> cards = new();
+    private MatchingCardDto? currentCard;
+    private int currentIndex = 1;
+    private bool loading = true;
+    private bool submitting = false;
+    private bool answered = false;
+    private Guid sessionId;
+
+    private string inputArticle = "";
+    private string inputGerman = "";
+    private string cardResultClass = "";
+    private string feedbackMessage = "";
+    private string lastCorrectArticle = "";
+    private string lastCorrectGerman = "";
+    private string? aiComment = null;
+    private List<MatchingAnswerContextDto> previousResponses = new();
+
+    private ElementReference germanInput;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSession();
+    }
+
+    private async Task LoadSession()
+    {
+        loading = true;
+        try
+        {
+            var response = await MatchingSessionService.GetSessionAsync(Level, 10);
+
+            if (response != null)
+            {
+                sessionId = response.SessionId;
+                cards = response.Cards;
+                previousResponses.Clear();
+                currentIndex = 1;
+                if (cards.Any())
+                {
+                    currentCard = cards[0];
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading session: {ex.Message}");
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task SubmitAnswer()
+    {
+        if (currentCard == null || string.IsNullOrWhiteSpace(inputGerman)) return;
+
+        submitting = true;
+
+        try
+        {
+            var request = new SubmitMatchingAnswerRequest
+            {
+                SessionId = sessionId,
+                NounId = currentCard.NounId,
+                SubmittedGerman = inputGerman,
+                SubmittedArticle = inputArticle,
+                PreviousResponses = previousResponses.ToList()
+            };
+
+            var result = await MatchingAnswerService.SubmitAsync(request);
+
+            if (result != null)
+            {
+                answered = true;
+                lastCorrectArticle = result.CorrectArticle;
+                lastCorrectGerman = result.CorrectGerman;
+                feedbackMessage = result.Message;
+                aiComment = result.AiComment;
+
+                cardResultClass = result.Result switch
+                {
+                    "correct" => "result-correct",
+                    "partial" => "result-partial",
+                    _ => "result-wrong"
+                };
+
+                previousResponses.Add(new MatchingAnswerContextDto
+                {
+                    PromptEs = currentCard.TranslationEs,
+                    SubmittedGerman = inputGerman,
+                    SubmittedArticle = inputArticle,
+                    WasCorrect = result.Result == "correct"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error submitting answer: {ex.Message}");
+            feedbackMessage = "Error al verificar. Intenta de nuevo.";
+        }
+        finally
+        {
+            submitting = false;
+        }
+    }
+
+    private void NextCard()
+    {
+        if (currentIndex < cards.Count)
+        {
+            currentIndex++;
+            currentCard = cards[currentIndex - 1];
+            ResetForNextCard();
+        }
+        else
+        {
+            // Session complete
+            Navigation.NavigateTo($"/?completed=matching");
+        }
+    }
+
+    private void ResetForNextCard()
+    {
+        inputArticle = "";
+        inputGerman = "";
+        answered = false;
+        cardResultClass = "";
+        feedbackMessage = "";
+        lastCorrectArticle = "";
+        lastCorrectGerman = "";
+        aiComment = null;
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+
+    private void GoToNounAdmin()
+    {
+        Navigation.NavigateTo("/noun-admin");
+    }
+
+    private double ProgressPercentage => cards.Any() ? ((double)currentIndex / cards.Count) * 100 : 0;
+}

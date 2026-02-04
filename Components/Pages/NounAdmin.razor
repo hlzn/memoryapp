@@ -1,0 +1,729 @@
+@page "/noun-admin"
+@using System.Net.Http.Json
+@using MemoryApp.Contracts
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Administración de Sustantivos - VerbMeister</PageTitle>
+
+<div class="container">
+    <div class="text-center mb-2">
+        <h1>Administración de Sustantivos</h1>
+        <p class="text-muted">Agrega, edita y elimina sustantivos del sistema</p>
+    </div>
+
+    <div class="admin-tabs mb-2">
+        <button class="tab-btn @(activeTab == "add" ? "active" : "")" @onclick='() => SetTab("add")'>Agregar Sustantivo</button>
+        <button class="tab-btn @(activeTab == "csv" ? "active" : "")" @onclick='() => SetTab("csv")'>Importar CSV</button>
+        <button class="tab-btn @(activeTab == "list" ? "active" : "")" @onclick='() => SetTab("list")'>Lista de Sustantivos</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="feedback @messageClass mb-1">
+            @message
+        </div>
+    }
+
+    @if (activeTab == "add")
+    {
+        <div class="card">
+            <h2>@(editingNoun != null ? "Editar Sustantivo" : "Agregar Nuevo Sustantivo")</h2>
+            <form @onsubmit="SaveNoun" @onsubmit:preventDefault>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Palabra (Alemán) *</label>
+                        <input type="text" @bind="formGerman" placeholder="ej: Haus" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Artículo</label>
+                        <select @bind="formArticle">
+                            <option value="">-- (sin artículo)</option>
+                            <option value="der">der (masculino)</option>
+                            <option value="die">die (femenino)</option>
+                            <option value="das">das (neutro)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Traducción (Español) *</label>
+                        <input type="text" @bind="formTranslationEs" placeholder="ej: casa" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Nivel *</label>
+                        <select @bind="formLevel">
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Plural</label>
+                        <input type="text" @bind="formPlural" placeholder="ej: Häuser" />
+                    </div>
+                    <div class="form-group full-width">
+                        <label>Notas</label>
+                        <textarea @bind="formNotes" placeholder="Notas adicionales sobre el sustantivo..." rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="btn-group mt-1">
+                    <button type="submit" class="btn btn-primary" disabled="@saving">
+                        @(saving ? "Guardando..." : (editingNoun != null ? "Actualizar" : "Agregar Sustantivo"))
+                    </button>
+                    @if (editingNoun != null)
+                    {
+                        <button type="button" class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+                    }
+                </div>
+            </form>
+        </div>
+    }
+    else if (activeTab == "csv")
+    {
+        <div class="card">
+            <h2>Importar Sustantivos desde CSV</h2>
+            <p class="text-muted mb-1">Formato esperado (con encabezado opcional):</p>
+            <code class="csv-format">German,Article,TranslationEs,Level,Plural,Notes</code>
+
+            <div class="form-group mt-1">
+                <label>Contenido CSV</label>
+                <textarea @bind="csvContent" placeholder="Pega aquí el contenido CSV o carga un archivo..." rows="10"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>O sube un archivo CSV</label>
+                <InputFile OnChange="HandleFileUpload" accept=".csv" />
+            </div>
+
+            <button class="btn btn-primary mt-1" @onclick="ImportCsv" disabled="@(importing || string.IsNullOrWhiteSpace(csvContent))">
+                @(importing ? "Importando..." : "Importar CSV")
+            </button>
+
+            @if (importErrors.Any())
+            {
+                <div class="import-errors mt-1">
+                    <h4>Errores de importación:</h4>
+                    <ul>
+                        @foreach (var error in importErrors.Take(10))
+                        {
+                            <li>@error</li>
+                        }
+                        @if (importErrors.Count > 10)
+                        {
+                            <li>... y @(importErrors.Count - 10) errores más</li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    }
+    else if (activeTab == "list")
+    {
+        <div class="card">
+            <div class="list-header">
+                <h2>Sustantivos Existentes</h2>
+                <div class="header-actions">
+                    <select @bind="filterLevel" @bind:after="LoadNouns">
+                        <option value="">Todos los niveles</option>
+                        <option value="A1">A1</option>
+                        <option value="A2">A2</option>
+                        <option value="B1">B1</option>
+                        <option value="B2">B2</option>
+                    </select>
+                    <a href="@GetExportUrl()" class="btn btn-secondary" download>
+                        Exportar CSV
+                    </a>
+                </div>
+            </div>
+
+            @if (loadingNouns)
+            {
+                <p class="text-center">Cargando sustantivos...</p>
+            }
+            else if (nouns == null || !nouns.Any())
+            {
+                <p class="text-center text-muted">No hay sustantivos registrados.</p>
+            }
+            else
+            {
+                <p class="text-muted mb-1">Total: @totalNouns sustantivos</p>
+                <div class="nouns-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Artículo</th>
+                                <th>Sustantivo</th>
+                                <th>Traducción</th>
+                                <th>Nivel</th>
+                                <th>Plural</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var noun in nouns)
+                            {
+                                <tr>
+                                    <td>
+                                        @if (string.IsNullOrWhiteSpace(noun.Article))
+                                        {
+                                            <span class="text-muted">—</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="article article-@noun.Article">@noun.Article</span>
+                                        }
+                                    </td>
+                                    <td>@noun.German</td>
+                                    <td>@noun.TranslationEs</td>
+                                    <td><span class="badge">@noun.Level</span></td>
+                                    <td>@(noun.Plural ?? "-")</td>
+                                    <td class="actions">
+                                        <button class="btn-icon" @onclick="() => EditNoun(noun)" title="Editar">✏️</button>
+                                        <button class="btn-icon btn-danger" @onclick="() => DeleteNoun(noun)" title="Eliminar">🗑️</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (totalNouns > nouns.Count)
+                {
+                    <div class="pagination mt-1">
+                        <button class="btn btn-secondary" @onclick="LoadMoreNouns" disabled="@loadingNouns">
+                            Cargar más (@nouns.Count / @totalNouns)
+                        </button>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+    <div class="mt-2 text-center">
+        <button class="btn btn-secondary" @onclick="GoHome">Volver al Inicio</button>
+    </div>
+</div>
+
+<style>
+    .admin-tabs {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .tab-btn {
+        padding: 0.75rem 1.5rem;
+        border: 2px solid var(--primary);
+        background: transparent;
+        color: var(--text);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+        background: var(--primary);
+        color: white;
+    }
+
+    .tab-btn.active {
+        background: var(--primary);
+        color: white;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .form-group.full-width {
+        grid-column: 1 / -1;
+    }
+
+    .form-group label {
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card-bg);
+        color: var(--text);
+        font-size: 1rem;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+
+    .csv-format {
+        display: block;
+        padding: 0.75rem;
+        background: var(--bg);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        overflow-x: auto;
+    }
+
+    .import-errors {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid var(--error);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    .import-errors h4 {
+        color: var(--error);
+        margin-bottom: 0.5rem;
+    }
+
+    .import-errors ul {
+        margin: 0;
+        padding-left: 1.5rem;
+        font-size: 0.875rem;
+    }
+
+    .list-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .list-header h2 {
+        margin: 0;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .header-actions select {
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card-bg);
+        color: var(--text);
+    }
+
+    .header-actions a.btn {
+        text-decoration: none;
+    }
+
+    .nouns-table {
+        overflow-x: auto;
+    }
+
+    .nouns-table table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .nouns-table th,
+    .nouns-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .nouns-table th {
+        font-weight: 600;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    .nouns-table tr:hover {
+        background: var(--bg);
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        background: var(--primary);
+        color: white;
+    }
+
+    .article {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+
+    .article-der {
+        background: #3b82f6;
+        color: white;
+    }
+
+    .article-die {
+        background: #ec4899;
+        color: white;
+    }
+
+    .article-das {
+        background: #22c55e;
+        color: white;
+    }
+
+    .actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn-icon {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 0.25rem;
+        border-radius: 4px;
+    }
+
+    .btn-icon:hover {
+        background: var(--bg);
+    }
+
+    .btn-icon.btn-danger:hover {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .pagination {
+        text-align: center;
+    }
+</style>
+
+@code {
+    private string activeTab = "add";
+    private string message = "";
+    private string messageClass = "";
+
+    // Form fields
+    private NounDto? editingNoun = null;
+    private string formGerman = "";
+    private string formArticle = "der";
+    private string formTranslationEs = "";
+    private string formLevel = "A1";
+    private string? formPlural = null;
+    private string? formNotes = null;
+    private bool saving = false;
+
+    // CSV import
+    private string csvContent = "";
+    private bool importing = false;
+    private List<string> importErrors = new();
+
+    // Noun list
+    private List<NounDto>? nouns = null;
+    private int totalNouns = 0;
+    private bool loadingNouns = false;
+    private string filterLevel = "";
+    private int currentSkip = 0;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNouns();
+    }
+
+    private void SetTab(string tab)
+    {
+        activeTab = tab;
+        message = "";
+        if (tab == "list" && nouns == null)
+        {
+            _ = LoadNouns();
+        }
+    }
+
+    private async Task SaveNoun()
+    {
+        saving = true;
+        message = "";
+
+        try
+        {
+            if (editingNoun != null)
+            {
+                var request = new UpdateNounRequest
+                {
+                    Id = editingNoun.Id,
+                    German = formGerman,
+                    Article = formArticle,
+                    TranslationEs = formTranslationEs,
+                    Level = formLevel,
+                    Plural = formPlural,
+                    Notes = formNotes
+                };
+
+                var response = await Http.PutAsJsonAsync("/api/v1/nouns", request);
+                var result = await response.Content.ReadFromJsonAsync<UpdateNounResponse>();
+
+                if (result?.Success == true)
+                {
+                    message = "Sustantivo actualizado correctamente";
+                    messageClass = "feedback-success";
+                    CancelEdit();
+                    await LoadNouns();
+                }
+                else
+                {
+                    message = result?.Error ?? "Error al actualizar el sustantivo";
+                    messageClass = "feedback-error";
+                }
+            }
+            else
+            {
+                var request = new CreateNounRequest
+                {
+                    German = formGerman,
+                    Article = formArticle,
+                    TranslationEs = formTranslationEs,
+                    Level = formLevel,
+                    Plural = formPlural,
+                    Notes = formNotes
+                };
+
+                var response = await Http.PostAsJsonAsync("/api/v1/nouns", request);
+                var result = await response.Content.ReadFromJsonAsync<CreateNounResponse>();
+
+                if (result?.Success == true)
+                {
+                    message = $"Sustantivo '{formGerman}' agregado correctamente";
+                    messageClass = "feedback-success";
+                    ClearForm();
+                    await LoadNouns();
+                }
+                else
+                {
+                    message = result?.Error ?? "Error al agregar el sustantivo";
+                    messageClass = "feedback-error";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void ClearForm()
+    {
+        formGerman = "";
+        formArticle = "der";
+        formTranslationEs = "";
+        formLevel = "A1";
+        formPlural = null;
+        formNotes = null;
+        editingNoun = null;
+    }
+
+    private void CancelEdit()
+    {
+        ClearForm();
+        message = "";
+    }
+
+    private void EditNoun(NounDto noun)
+    {
+        editingNoun = noun;
+        formGerman = noun.German;
+        formArticle = noun.Article ?? string.Empty;
+        formTranslationEs = noun.TranslationEs;
+        formLevel = noun.Level;
+        formPlural = noun.Plural;
+        formNotes = noun.Notes;
+        activeTab = "add";
+        message = "";
+    }
+
+    private async Task DeleteNoun(NounDto noun)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"/api/v1/nouns/{noun.Id}");
+            var result = await response.Content.ReadFromJsonAsync<DeleteNounResponse>();
+
+            if (result?.Success == true)
+            {
+                message = $"Sustantivo '{noun.German}' eliminado";
+                messageClass = "feedback-success";
+                await LoadNouns();
+            }
+            else
+            {
+                message = result?.Error ?? "Error al eliminar el sustantivo";
+                messageClass = "feedback-error";
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            var file = e.File;
+            if (file != null)
+            {
+                using var reader = new StreamReader(file.OpenReadStream());
+                csvContent = await reader.ReadToEndAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error al leer el archivo: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+    }
+
+    private async Task ImportCsv()
+    {
+        importing = true;
+        importErrors.Clear();
+        message = "";
+
+        try
+        {
+            var request = new ImportNounsCsvRequest { CsvContent = csvContent };
+            var response = await Http.PostAsJsonAsync("/api/v1/nouns/csv", request);
+            var result = await response.Content.ReadFromJsonAsync<ImportNounsCsvResponse>();
+
+            if (result != null)
+            {
+                if (result.ImportedCount > 0)
+                {
+                    message = $"Se importaron {result.ImportedCount} sustantivos. {(result.SkippedCount > 0 ? $"Se omitieron {result.SkippedCount}." : "")}";
+                    messageClass = result.SkippedCount > 0 ? "feedback-info" : "feedback-success";
+                    csvContent = "";
+                    await LoadNouns();
+                }
+                else
+                {
+                    message = "No se importó ningún sustantivo";
+                    messageClass = "feedback-error";
+                }
+
+                importErrors = result.Errors;
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+        finally
+        {
+            importing = false;
+        }
+    }
+
+    private async Task LoadNouns()
+    {
+        loadingNouns = true;
+        currentSkip = 0;
+
+        try
+        {
+            var url = $"/api/v1/nouns?take={PageSize}&skip=0";
+            if (!string.IsNullOrEmpty(filterLevel))
+            {
+                url += $"&level={filterLevel}";
+            }
+
+            var response = await Http.GetFromJsonAsync<GetNounsResponse>(url);
+            if (response != null)
+            {
+                nouns = response.Nouns;
+                totalNouns = response.Total;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading nouns: {ex.Message}");
+        }
+        finally
+        {
+            loadingNouns = false;
+        }
+    }
+
+    private async Task LoadMoreNouns()
+    {
+        if (nouns == null) return;
+
+        loadingNouns = true;
+        currentSkip += PageSize;
+
+        try
+        {
+            var url = $"/api/v1/nouns?take={PageSize}&skip={currentSkip}";
+            if (!string.IsNullOrEmpty(filterLevel))
+            {
+                url += $"&level={filterLevel}";
+            }
+
+            var response = await Http.GetFromJsonAsync<GetNounsResponse>(url);
+            if (response != null)
+            {
+                nouns.AddRange(response.Nouns);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading more nouns: {ex.Message}");
+        }
+        finally
+        {
+            loadingNouns = false;
+        }
+    }
+
+    private string GetExportUrl()
+    {
+        var url = "/api/v1/nouns/export";
+        if (!string.IsNullOrEmpty(filterLevel))
+        {
+            url += $"?level={filterLevel}";
+        }
+        return url;
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+}

@@ -18,6 +18,9 @@ public class AppDbContext : DbContext
     public DbSet<Attempt> Attempts => Set<Attempt>();
     public DbSet<UserVerbProgress> UserVerbProgress => Set<UserVerbProgress>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<Noun> Nouns => Set<Noun>();
+    public DbSet<UserNounProgress> UserNounProgress => Set<UserNounProgress>();
+    public DbSet<AppSettings> AppSettings => Set<AppSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -138,6 +141,42 @@ public class AppDbContext : DbContext
                 .WithOne(u => u.Settings)
                 .HasForeignKey<UserSettings>(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Noun configuration
+        modelBuilder.Entity<Noun>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.German).IsRequired();
+            entity.HasIndex(e => e.German).IsUnique();
+            entity.Property(e => e.Article).IsRequired();
+            entity.Property(e => e.TranslationEs).IsRequired();
+            entity.Property(e => e.Level).IsRequired();
+        });
+
+        // UserNounProgress configuration (composite key)
+        modelBuilder.Entity<UserNounProgress>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.NounId });
+            entity.Property(e => e.Mastery).IsRequired();
+            entity.Property(e => e.NextReviewAt).IsRequired();
+            entity.Property(e => e.LastResult).IsRequired();
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.NounProgress)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Noun)
+                .WithMany(n => n.UserProgress)
+                .HasForeignKey(e => e.NounId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // AppSettings configuration (single row)
+        modelBuilder.Entity<AppSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
         });
     }
 }

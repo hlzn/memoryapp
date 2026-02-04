@@ -1,5 +1,6 @@
 @page "/"
 @inject NavigationManager Navigation
+@rendermode InteractiveServer
 
 <PageTitle>VerbMeister - Aprende Verbos Alemanes</PageTitle>
 
@@ -31,9 +32,29 @@
             <p class="text-muted">Practica verbos en contexto real</p>
         </div>
 
+        <div class="card card-clickable" @onclick="StartMatching">
+            <h2>🔤 Matching de Sustantivos</h2>
+            <p class="text-muted">Aprende sustantivos con sus artículos (der, die, das)</p>
+        </div>
+
         <div class="card card-clickable" @onclick="ViewProgress">
             <h2>📊 Ver Mi Progreso</h2>
             <p class="text-muted">Revisa tus estadísticas y dominio de verbos</p>
+        </div>
+
+        <div class="card card-clickable" @onclick="GoToAdmin">
+            <h2>⚙️ Administración de Verbos</h2>
+            <p class="text-muted">Agrega, edita y elimina verbos del sistema</p>
+        </div>
+
+        <div class="card card-clickable" @onclick="GoToNounAdmin">
+            <h2>⚙️ Administración de Sustantivos</h2>
+            <p class="text-muted">Agrega, edita y elimina sustantivos del sistema</p>
+        </div>
+
+        <div class="card card-clickable" @onclick="GoToSettings">
+            <h2>🔧 Configuración</h2>
+            <p class="text-muted">Ajusta las opciones de la aplicación y configura la IA</p>
         </div>
     </div>
 </div>
@@ -59,5 +80,25 @@
     private void ViewProgress()
     {
         Navigation.NavigateTo($"/progress?level={selectedLevel}");
+    }
+
+    private void StartMatching()
+    {
+        Navigation.NavigateTo("/matching");
+    }
+
+    private void GoToAdmin()
+    {
+        Navigation.NavigateTo("/admin");
+    }
+
+    private void GoToNounAdmin()
+    {
+        Navigation.NavigateTo("/noun-admin");
+    }
+
+    private void GoToSettings()
+    {
+        Navigation.NavigateTo("/settings");
     }
 }

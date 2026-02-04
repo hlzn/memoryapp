@@ -1,0 +1,766 @@
+@page "/admin"
+@using System.Net.Http.Json
+@using MemoryApp.Contracts
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Administración - VerbMeister</PageTitle>
+
+<div class="container">
+    <div class="text-center mb-2">
+        <h1>Administración de Verbos</h1>
+        <p class="text-muted">Agrega, edita y elimina verbos del sistema</p>
+    </div>
+
+    <div class="admin-tabs mb-2">
+        <button class="tab-btn @(activeTab == "add" ? "active" : "")" @onclick='() => SetTab("add")'>Agregar Verbo</button>
+        <button class="tab-btn @(activeTab == "csv" ? "active" : "")" @onclick='() => SetTab("csv")'>Importar CSV</button>
+        <button class="tab-btn @(activeTab == "list" ? "active" : "")" @onclick='() => SetTab("list")'>Lista de Verbos</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="feedback @messageClass mb-1">
+            @message
+        </div>
+    }
+
+    @if (activeTab == "add")
+    {
+        <div class="card">
+            <h2>@(editingVerb != null ? "Editar Verbo" : "Agregar Nuevo Verbo")</h2>
+            <form @onsubmit="SaveVerb" @onsubmit:preventDefault>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Infinitivo (Alemán) *</label>
+                        <input type="text" @bind="formInfinitive" placeholder="ej: machen" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Traducción (Español) *</label>
+                        <input type="text" @bind="formTranslationEs" placeholder="ej: hacer" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Nivel *</label>
+                        <select @bind="formLevel">
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Auxiliar *</label>
+                        <select @bind="formAuxiliary">
+                            <option value="haben">haben</option>
+                            <option value="sein">sein</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Partizip II *</label>
+                        <input type="text" @bind="formPartizipII" placeholder="ej: gemacht" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Präteritum (ich)</label>
+                        <input type="text" @bind="formPraeteritumIch" placeholder="ej: machte" />
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" @bind="formIsSeparable" />
+                            Es separable
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Prefijo (si es separable)</label>
+                        <input type="text" @bind="formPrefix" placeholder="ej: auf" disabled="@(!formIsSeparable)" />
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" @bind="formIsIrregular" />
+                            Es irregular
+                        </label>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>Notas</label>
+                        <textarea @bind="formNotes" placeholder="Notas adicionales sobre el verbo..." rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="btn-group mt-1">
+                    <button type="submit" class="btn btn-primary" disabled="@saving">
+                        @(saving ? "Guardando..." : (editingVerb != null ? "Actualizar" : "Agregar Verbo"))
+                    </button>
+                    @if (editingVerb != null)
+                    {
+                        <button type="button" class="btn btn-secondary" @onclick="CancelEdit">Cancelar</button>
+                    }
+                </div>
+            </form>
+        </div>
+    }
+    else if (activeTab == "csv")
+    {
+        <div class="card">
+            <h2>Importar Verbos desde CSV</h2>
+            <p class="text-muted mb-1">Formato esperado (con encabezado opcional):</p>
+            <code class="csv-format">Infinitive,TranslationEs,Level,IsSeparable,Prefix,IsIrregular,Auxiliary,PartizipII,PraeteritumIch,Notes</code>
+
+            <div class="form-group mt-1">
+                <label>Contenido CSV</label>
+                <textarea @bind="csvContent" placeholder="Pega aquí el contenido CSV o carga un archivo..." rows="10"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>O sube un archivo CSV</label>
+                <InputFile OnChange="HandleFileUpload" accept=".csv" />
+            </div>
+
+            <button class="btn btn-primary mt-1" @onclick="ImportCsv" disabled="@(importing || string.IsNullOrWhiteSpace(csvContent))">
+                @(importing ? "Importando..." : "Importar CSV")
+            </button>
+
+            @if (importErrors.Any())
+            {
+                <div class="import-errors mt-1">
+                    <h4>Errores de importación:</h4>
+                    <ul>
+                        @foreach (var error in importErrors.Take(10))
+                        {
+                            <li>@error</li>
+                        }
+                        @if (importErrors.Count > 10)
+                        {
+                            <li>... y @(importErrors.Count - 10) errores más</li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    }
+    else if (activeTab == "list")
+    {
+        <div class="card">
+            <div class="list-header">
+                <h2>Verbos Existentes</h2>
+                <div class="header-actions">
+                    <select @bind="filterLevel" @bind:after="LoadVerbs">
+                        <option value="">Todos los niveles</option>
+                        <option value="A1">A1</option>
+                        <option value="A2">A2</option>
+                        <option value="B1">B1</option>
+                        <option value="B2">B2</option>
+                    </select>
+                    <a href="@GetExportUrl()" class="btn btn-secondary" download>
+                        Exportar CSV
+                    </a>
+                </div>
+            </div>
+
+            @if (loadingVerbs)
+            {
+                <p class="text-center">Cargando verbos...</p>
+            }
+            else if (verbs == null || !verbs.Any())
+            {
+                <p class="text-center text-muted">No hay verbos registrados.</p>
+            }
+            else
+            {
+                <p class="text-muted mb-1">Total: @totalVerbs verbos</p>
+                <div class="verbs-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Infinitivo</th>
+                                <th>Traducción</th>
+                                <th>Nivel</th>
+                                <th>Partizip II</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var verb in verbs)
+                            {
+                                <tr>
+                                    <td>
+                                        @verb.Infinitive
+                                        @if (verb.IsSeparable) { <span class="badge badge-info">sep</span> }
+                                        @if (verb.IsIrregular) { <span class="badge badge-warning">irreg</span> }
+                                    </td>
+                                    <td>@verb.TranslationEs</td>
+                                    <td><span class="badge">@verb.Level</span></td>
+                                    <td>@verb.PartizipII</td>
+                                    <td class="actions">
+                                        <button class="btn-icon" @onclick="() => EditVerb(verb)" title="Editar">✏️</button>
+                                        <button class="btn-icon btn-danger" @onclick="() => DeleteVerb(verb)" title="Eliminar">🗑️</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (totalVerbs > verbs.Count)
+                {
+                    <div class="pagination mt-1">
+                        <button class="btn btn-secondary" @onclick="LoadMoreVerbs" disabled="@loadingVerbs">
+                            Cargar más (@verbs.Count / @totalVerbs)
+                        </button>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+    <div class="mt-2 text-center">
+        <button class="btn btn-secondary" @onclick="GoHome">Volver al Inicio</button>
+    </div>
+</div>
+
+<style>
+    .admin-tabs {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .tab-btn {
+        padding: 0.75rem 1.5rem;
+        border: 2px solid var(--primary);
+        background: transparent;
+        color: var(--text);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+        background: var(--primary);
+        color: white;
+    }
+
+    .tab-btn.active {
+        background: var(--primary);
+        color: white;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .form-group.full-width {
+        grid-column: 1 / -1;
+    }
+
+    .form-group label {
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card-bg);
+        color: var(--text);
+        font-size: 1rem;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+
+    .form-group input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-weight: normal;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+
+    .csv-format {
+        display: block;
+        padding: 0.75rem;
+        background: var(--bg);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        overflow-x: auto;
+    }
+
+    .import-errors {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid var(--error);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    .import-errors h4 {
+        color: var(--error);
+        margin-bottom: 0.5rem;
+    }
+
+    .import-errors ul {
+        margin: 0;
+        padding-left: 1.5rem;
+        font-size: 0.875rem;
+    }
+
+    .list-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .list-header h2 {
+        margin: 0;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .header-actions select {
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card-bg);
+        color: var(--text);
+    }
+
+    .header-actions a.btn {
+        text-decoration: none;
+    }
+
+    .verbs-table {
+        overflow-x: auto;
+    }
+
+    .verbs-table table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .verbs-table th,
+    .verbs-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .verbs-table th {
+        font-weight: 600;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    .verbs-table tr:hover {
+        background: var(--bg);
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        background: var(--primary);
+        color: white;
+    }
+
+    .badge-info {
+        background: var(--secondary);
+    }
+
+    .badge-warning {
+        background: #f59e0b;
+    }
+
+    .actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn-icon {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 0.25rem;
+        border-radius: 4px;
+    }
+
+    .btn-icon:hover {
+        background: var(--bg);
+    }
+
+    .btn-icon.btn-danger:hover {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .pagination {
+        text-align: center;
+    }
+</style>
+
+@code {
+    private string activeTab = "add";
+    private string message = "";
+    private string messageClass = "";
+
+    // Form fields
+    private int? editingVerbId = null;
+    private VerbDto? editingVerb = null;
+    private string formInfinitive = "";
+    private string formTranslationEs = "";
+    private string formLevel = "A1";
+    private bool formIsSeparable = false;
+    private string? formPrefix = null;
+    private bool formIsIrregular = false;
+    private string formAuxiliary = "haben";
+    private string formPartizipII = "";
+    private string? formPraeteritumIch = null;
+    private string? formNotes = null;
+    private bool saving = false;
+
+    // CSV import
+    private string csvContent = "";
+    private bool importing = false;
+    private List<string> importErrors = new();
+
+    // Verb list
+    private List<VerbDto>? verbs = null;
+    private int totalVerbs = 0;
+    private bool loadingVerbs = false;
+    private string filterLevel = "";
+    private int currentSkip = 0;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadVerbs();
+    }
+
+    private void SetTab(string tab)
+    {
+        activeTab = tab;
+        message = "";
+        if (tab == "list" && verbs == null)
+        {
+            _ = LoadVerbs();
+        }
+    }
+
+    private async Task SaveVerb()
+    {
+        saving = true;
+        message = "";
+
+        try
+        {
+            if (editingVerb != null)
+            {
+                var request = new UpdateVerbRequest
+                {
+                    Id = editingVerb.Id,
+                    Infinitive = formInfinitive,
+                    TranslationEs = formTranslationEs,
+                    Level = formLevel,
+                    IsSeparable = formIsSeparable,
+                    Prefix = formIsSeparable ? formPrefix : null,
+                    IsIrregular = formIsIrregular,
+                    Auxiliary = formAuxiliary,
+                    PartizipII = formPartizipII,
+                    PraeteritumIch = formPraeteritumIch,
+                    Notes = formNotes
+                };
+
+                var response = await Http.PutAsJsonAsync("/api/v1/admin/verbs", request);
+                var result = await response.Content.ReadFromJsonAsync<UpdateVerbResponse>();
+
+                if (result?.Success == true)
+                {
+                    message = "Verbo actualizado correctamente";
+                    messageClass = "feedback-success";
+                    CancelEdit();
+                    await LoadVerbs();
+                }
+                else
+                {
+                    message = result?.Error ?? "Error al actualizar el verbo";
+                    messageClass = "feedback-error";
+                }
+            }
+            else
+            {
+                var request = new CreateVerbRequest
+                {
+                    Infinitive = formInfinitive,
+                    TranslationEs = formTranslationEs,
+                    Level = formLevel,
+                    IsSeparable = formIsSeparable,
+                    Prefix = formIsSeparable ? formPrefix : null,
+                    IsIrregular = formIsIrregular,
+                    Auxiliary = formAuxiliary,
+                    PartizipII = formPartizipII,
+                    PraeteritumIch = formPraeteritumIch,
+                    Notes = formNotes
+                };
+
+                var response = await Http.PostAsJsonAsync("/api/v1/admin/verbs", request);
+                var result = await response.Content.ReadFromJsonAsync<CreateVerbResponse>();
+
+                if (result?.Success == true)
+                {
+                    message = $"Verbo '{formInfinitive}' agregado correctamente";
+                    messageClass = "feedback-success";
+                    ClearForm();
+                    await LoadVerbs();
+                }
+                else
+                {
+                    message = result?.Error ?? "Error al agregar el verbo";
+                    messageClass = "feedback-error";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void ClearForm()
+    {
+        formInfinitive = "";
+        formTranslationEs = "";
+        formLevel = "A1";
+        formIsSeparable = false;
+        formPrefix = null;
+        formIsIrregular = false;
+        formAuxiliary = "haben";
+        formPartizipII = "";
+        formPraeteritumIch = null;
+        formNotes = null;
+        editingVerbId = null;
+        editingVerb = null;
+    }
+
+    private void CancelEdit()
+    {
+        ClearForm();
+        message = "";
+    }
+
+    private void EditVerb(VerbDto verb)
+    {
+        editingVerb = verb;
+        editingVerbId = verb.Id;
+        formInfinitive = verb.Infinitive;
+        formTranslationEs = verb.TranslationEs;
+        formLevel = verb.Level;
+        formIsSeparable = verb.IsSeparable;
+        formPrefix = verb.Prefix;
+        formIsIrregular = verb.IsIrregular;
+        formAuxiliary = verb.Auxiliary;
+        formPartizipII = verb.PartizipII;
+        formPraeteritumIch = verb.PraeteritumIch;
+        formNotes = verb.Notes;
+        activeTab = "add";
+        message = "";
+    }
+
+    private async Task DeleteVerb(VerbDto verb)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"/api/v1/admin/verbs/{verb.Id}");
+            var result = await response.Content.ReadFromJsonAsync<DeleteVerbResponse>();
+
+            if (result?.Success == true)
+            {
+                message = $"Verbo '{verb.Infinitive}' eliminado";
+                messageClass = "feedback-success";
+                await LoadVerbs();
+            }
+            else
+            {
+                message = result?.Error ?? "Error al eliminar el verbo";
+                messageClass = "feedback-error";
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            var file = e.File;
+            if (file != null)
+            {
+                using var reader = new StreamReader(file.OpenReadStream());
+                csvContent = await reader.ReadToEndAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error al leer el archivo: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+    }
+
+    private async Task ImportCsv()
+    {
+        importing = true;
+        importErrors.Clear();
+        message = "";
+
+        try
+        {
+            var request = new ImportCsvRequest { CsvContent = csvContent };
+            var response = await Http.PostAsJsonAsync("/api/v1/admin/verbs/csv", request);
+            var result = await response.Content.ReadFromJsonAsync<ImportCsvResponse>();
+
+            if (result != null)
+            {
+                if (result.ImportedCount > 0)
+                {
+                    message = $"Se importaron {result.ImportedCount} verbos. {(result.SkippedCount > 0 ? $"Se omitieron {result.SkippedCount}." : "")}";
+                    messageClass = result.SkippedCount > 0 ? "feedback-info" : "feedback-success";
+                    csvContent = "";
+                    await LoadVerbs();
+                }
+                else
+                {
+                    message = "No se importó ningún verbo";
+                    messageClass = "feedback-error";
+                }
+
+                importErrors = result.Errors;
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+            messageClass = "feedback-error";
+        }
+        finally
+        {
+            importing = false;
+        }
+    }
+
+    private async Task LoadVerbs()
+    {
+        loadingVerbs = true;
+        currentSkip = 0;
+
+        try
+        {
+            var url = $"/api/v1/verbs?take={PageSize}&skip=0";
+            if (!string.IsNullOrEmpty(filterLevel))
+            {
+                url += $"&level={filterLevel}";
+            }
+
+            var response = await Http.GetFromJsonAsync<GetVerbsResponse>(url);
+            if (response != null)
+            {
+                verbs = response.Verbs;
+                totalVerbs = response.Total;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading verbs: {ex.Message}");
+        }
+        finally
+        {
+            loadingVerbs = false;
+        }
+    }
+
+    private async Task LoadMoreVerbs()
+    {
+        if (verbs == null) return;
+
+        loadingVerbs = true;
+        currentSkip += PageSize;
+
+        try
+        {
+            var url = $"/api/v1/verbs?take={PageSize}&skip={currentSkip}";
+            if (!string.IsNullOrEmpty(filterLevel))
+            {
+                url += $"&level={filterLevel}";
+            }
+
+            var response = await Http.GetFromJsonAsync<GetVerbsResponse>(url);
+            if (response != null)
+            {
+                verbs.AddRange(response.Verbs);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading more verbs: {ex.Message}");
+        }
+        finally
+        {
+            loadingVerbs = false;
+        }
+    }
+
+    private string GetExportUrl()
+    {
+        var url = "/api/v1/admin/verbs/export";
+        if (!string.IsNullOrEmpty(filterLevel))
+        {
+            url += $"?level={filterLevel}";
+        }
+        return url;
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+}
